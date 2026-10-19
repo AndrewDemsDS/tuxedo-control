@@ -28,6 +28,15 @@ const TEMP_SMOOTH_N: i32 = 3;
 /// Deadband: don't rewrite fan duty for curve-driven changes smaller than this many percent.
 /// Stops the fan oscillating on small temperature wobble; the safety floor still overrides it.
 const FAN_DEADBAND_PCT: i32 = 3;
+/// Consecutive implausible CPU temperature reads (error, <= 0 or >= 120 C) before the loop
+/// stops trusting the EC and hands the fan back to its automatic control.
+const MAX_BAD_TEMP_READS: u32 = 3;
+
+/// A CPU temperature the curve may act on. 0 is what a failed or raced EC read returns, and
+/// acting on it would let the curve switch the fan off while the CPU is hot.
+fn plausible_temp(t: i32) -> bool {
+    t > 0 && t < 120
+}
 
 /// Apply a profile's perf mode + (optional) keyboard backlight + charge profile.
 /// The control loop reads the fan curve live from the active profile.
@@ -542,6 +551,9 @@ fn main() {
 
     let mut commanded: i32 = -1;
     let mut smoothed_temp: i32 = -1; // EMA state; <0 = unseeded (first tick)
+    let mut bad_temp_reads: u32 = 0;
+    let mut ec_fallback = false; // true while the fan is handed back to the EC
+    let debug = std::env::var_os("TUXEDO_DEBUG").is_some();
     while !term.load(Ordering::Relaxed) {
         // Hold the device lock for the whole tick's ioctls (reads + fan write), then release.
         let (ct, gt, cpu_fan, gpu_fan, mode);
@@ -557,6 +569,41 @@ fn main() {
             let d = dev.lock().unwrap();
             ct = d.cpu_temp().unwrap_or(0);
             gt = d.gpu_temp().unwrap_or(0);
+            if debug {
+                eprintln!("tick: cpu_temp={ct} gpu_temp={gt}");
+            }
+            // Never steer the fan from an implausible reading. A few in a row means the EC
+            // interface is not answering: give the fan back to the EC instead of guessing.
+            if !plausible_temp(ct) {
+                bad_temp_reads += 1;
+                if bad_temp_reads >= MAX_BAD_TEMP_READS && !ec_fallback && !read_only {
+                    eprintln!(
+                        "{bad_temp_reads} implausible CPU temperature reads (last {ct}C): \
+                         handing the fan to the EC until reads recover"
+                    );
+                    let _ = d.restore_auto();
+                    ec_fallback = true;
+                }
+            }
+        }
+        if !plausible_temp(ct) {
+            {
+                let mut s = shared.lock().unwrap();
+                s.cpu_temp = ct;
+                s.gpu_temp = gt;
+            }
+            std::thread::sleep(Duration::from_secs(cfg.poll_seconds));
+            continue;
+        }
+        if ec_fallback {
+            eprintln!("CPU temperature reads recovered ({ct}C): resuming the fan curve");
+            ec_fallback = false;
+            commanded = -1;
+            smoothed_temp = -1;
+        }
+        bad_temp_reads = 0;
+        {
+            let d = dev.lock().unwrap();
             let temp_raw = ct.max(gt);
             // EMA-smooth the temperature so the fan follows the trend, not every sensor spike.
             // This is the main fix for audible up/down fan hunting. First tick seeds directly.
@@ -841,6 +888,15 @@ mod tests {
         kbd_write(d, -5).unwrap();
         assert_eq!(kbd_read(d, "brightness"), 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn implausible_temps_are_rejected() {
+        assert!(!plausible_temp(0));
+        assert!(!plausible_temp(-1));
+        assert!(!plausible_temp(120));
+        assert!(plausible_temp(35));
+        assert!(plausible_temp(95));
     }
 
     #[test]
