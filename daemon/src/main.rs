@@ -5,7 +5,9 @@
 //! can read status and change profile / fan mode without touching the device or fighting us.
 //!
 //! Socket: /run/tuxedo-control.sock  (one request line -> one response line)
-//!   STATUS            -> JSON {cpu_temp,gpu_temp,cpu_fan,gpu_fan,profile,manual,mode,curve_pct}
+//!   STATUS            -> JSON {cpu_temp,gpu_temp,cpu_fan,gpu_fan,profile,manual,mode,curve_pct,
+//!                        ...,ready}  (ready=false until the first loop tick, which can take
+//!                        ~13 s after start on the reference board while the EC settles)
 //!   PROFILE <name>    -> OK | ERR ...   (power_save|enthusiast|overboost)
 //!   FANAUTO           -> OK             (clear manual override -> resume curve)
 //!   FANMANUAL <0-100> -> OK             (hold a fixed duty)
@@ -131,6 +133,7 @@ struct Shared {
     charges: String, // current + space-separated available
     model_id: i32,
     read_only: bool, // unsupported model: no fan/EC writes, status only
+    ready: bool,     // false until the first control-loop tick filled the cache
 }
 
 // ---- Keyboard backlight (sysfs led) ----
@@ -253,10 +256,10 @@ fn handle_client(
         Some("STATUS") => {
             // Read ONLY the cache the loop maintains: instant, no device/EC access, no contention.
             let s = shared.lock().unwrap();
-            format!("{{\"cpu_temp\":{},\"gpu_temp\":{},\"cpu_fan\":{},\"gpu_fan\":{},\"mode\":{},\"curve_pct\":{},\"manual\":{},\"profile\":\"{}\",\"kbd\":{},\"kbd_max\":{},\"charge\":\"{}\",\"charges\":\"{}\",\"model_id\":{},\"read_only\":{}}}",
+            format!("{{\"cpu_temp\":{},\"gpu_temp\":{},\"cpu_fan\":{},\"gpu_fan\":{},\"mode\":{},\"curve_pct\":{},\"manual\":{},\"profile\":\"{}\",\"kbd\":{},\"kbd_max\":{},\"charge\":\"{}\",\"charges\":\"{}\",\"model_id\":{},\"read_only\":{},\"ready\":{}}}",
                 s.cpu_temp, s.gpu_temp, s.cpu_fan, s.gpu_fan, s.mode, s.curve_pct,
                 s.manual.map(|m| m.to_string()).unwrap_or_else(|| "null".into()), s.profile, s.kbd_cur, s.kbd_max,
-                s.charge, s.charges, s.model_id, s.read_only)
+                s.charge, s.charges, s.model_id, s.read_only, s.ready)
         }
         // Reject EC writes on unsupported boards (perf shares the 0x0751 register with fan).
         Some("PROFILE") if shared.lock().unwrap().read_only => {
@@ -668,6 +671,7 @@ fn main() {
             s.curve_pct = curve_target;
             s.kbd_cur = kbd_cur;
             s.charge = charge;
+            s.ready = true;
         }
         std::thread::sleep(Duration::from_secs(cfg.poll_seconds));
     }

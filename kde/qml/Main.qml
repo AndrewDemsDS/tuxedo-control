@@ -92,6 +92,12 @@ Kirigami.ApplicationWindow {
             }
             Kirigami.InlineMessage {
                 Layout.fillWidth: true
+                visible: Backend.daemonUp && root.st.ready === false
+                type: Kirigami.MessageType.Information
+                text: i18n("Waiting for the first EC reading. The EC keeps automatic fan control until then.")
+            }
+            Kirigami.InlineMessage {
+                Layout.fillWidth: true
                 visible: Backend.daemonUp && root.readOnly
                 type: Kirigami.MessageType.Warning
                 text: i18n("This board model (id %1) is not validated. Fan and EC writes are disabled.", root.st.model_id)
