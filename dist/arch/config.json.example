@@ -1,0 +1,4 @@
+{
+  "poll_seconds": 2,
+  "hysteresis_c": 3
+}

@@ -97,6 +97,37 @@ services.tuxedo-control = {
 
 > The driver enforces a ~25 % on-speed floor; a requested duty below ~12 % becomes 0 (off).
 
+## Arch Linux and KDE
+
+The daemon is not NixOS-specific. [`dist/arch/PKGBUILD`](dist/arch/PKGBUILD) builds two
+packages:
+
+- `tuxedo-control-git`: `tuxedo-controld`, the TUI, the prober, a systemd unit and a
+  `modules-load.d` entry for `tuxedo_io`.
+- `tuxedo-control-kde-git`: a Kirigami (Qt 6) GUI in [`kde/`](kde) that replaces the
+  GTK4 app on Plasma. It covers the same controls (live status, named profiles with a
+  drag-to-edit fan curve, EC performance mode, manual fan, keyboard backlight, charging,
+  TCC import) plus a selector for the TLP power profile.
+
+```sh
+cd dist/arch && makepkg -si
+sudo systemctl disable --now tccd tccd-sleep     # one fan controller at a time
+sudo systemctl enable --now tuxedo-control
+```
+
+The unit declares `Conflicts=tccd.service tailord.service`. Stopping it sends SIGTERM,
+and the daemon hands the fan back to the EC before it exits.
+
+### With TLP
+
+[`tuxedo-tlp`](https://github.com/AndrewDemsDS/tuxedo-tlp) splits the work: TLP owns CPU
+policy and the charge ceiling, `tuxedo-controld` owns fans, EC mode and keyboard. Its
+`tuxedo-tlp-controld-sync` service follows `tlp-pd`'s active profile and activates a
+matching controld profile (power-saver to Max Energy Save, balanced to Quiet,
+performance to High Performance). Keep `charge` unset in controld profiles and leave
+`profile` out of `/etc/tuxedo-control/config.json`, or the daemon re-applies it on every
+restart and overrides the sync.
+
 ## Roadmap (next)
 
 The initial roadmap (phases 0–6, declarative module options, a NixOS VM test, and model

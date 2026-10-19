@@ -1,0 +1,70 @@
+# Maintainer: Andreas Demosthenous <hello@andreasincode.com>
+pkgbase=tuxedo-control-git
+pkgname=('tuxedo-control-git' 'tuxedo-control-kde-git')
+pkgver=r0
+pkgrel=1
+pkgdesc="Fan curves, EC performance profiles, keyboard backlight and charging for TUXEDO Uniwill laptops"
+arch=('x86_64')
+url="https://github.com/AndrewDemsDS/tuxedo-control-nix"
+license=('MIT')
+makedepends=('git' 'cargo' 'cmake' 'extra-cmake-modules' 'qt6-declarative' 'kirigami' 'ki18n' 'kcoreaddons')
+source=("tuxedo-control::git+https://github.com/AndrewDemsDS/tuxedo-control-nix.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd tuxedo-control
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd tuxedo-control
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd tuxedo-control
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+    # The GTK GUI crate is not built: tuxedo-control-kde replaces it here.
+    cargo build --frozen --release -p tuxedo-control-daemon -p tuxedo-tui -p tuxedo-prober
+    cmake -B build-kde -S kde -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+    cmake --build build-kde
+}
+
+check() {
+    cd tuxedo-control
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+    cargo test --frozen --release -p tuxedoio -p tuxedo-control-daemon
+}
+
+package_tuxedo-control-git() {
+    pkgdesc="Fan-curve and EC profile daemon for TUXEDO Uniwill laptops via /dev/tuxedo_io (tuxedo-controld, TUI, prober)"
+    depends=('gcc-libs' 'glibc' 'tuxedo-drivers-dkms')
+    optdepends=('tuxedo-control-kde-git: KDE GUI'
+                'tuxedo-tlp-git: TLP charge ceiling and power-profile sync (tuxedo-tlp-controld-sync)')
+    provides=('tuxedo-control')
+    conflicts=('tuxedo-control' 'tuxedo-rs' 'tailord')
+    backup=('etc/tuxedo-control/config.json')
+    install=tuxedo-control.install
+    cd tuxedo-control
+    install -Dm755 target/release/tuxedo-controld "$pkgdir/usr/bin/tuxedo-controld"
+    install -Dm755 target/release/tuxedo-tui "$pkgdir/usr/bin/tuxedo-tui"
+    install -Dm755 target/release/tuxedo-prober "$pkgdir/usr/bin/tuxedo-prober"
+    install -Dm644 dist/systemd/tuxedo-control.service "$pkgdir/usr/lib/systemd/system/tuxedo-control.service"
+    install -Dm644 dist/systemd/tuxedo-control.conf "$pkgdir/usr/lib/modules-load.d/tuxedo-control.conf"
+    install -Dm644 dist/arch/config.json.example "$pkgdir/etc/tuxedo-control/config.json"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    cp -r docs "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+package_tuxedo-control-kde-git() {
+    pkgdesc="KDE (Kirigami) GUI for tuxedo-controld: fan curves, profiles, keyboard, charging and TLP power profile"
+    depends=('tuxedo-control' 'qt6-base' 'qt6-declarative' 'kirigami' 'ki18n' 'kcoreaddons' 'qqc2-desktop-style')
+    optdepends=('tlp-pd: TLP power-profile selector')
+    provides=('tuxedo-control-kde')
+    conflicts=('tuxedo-control-kde')
+    cd tuxedo-control
+    DESTDIR="$pkgdir" cmake --install build-kde
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

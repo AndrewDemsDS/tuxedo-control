@@ -18,3 +18,9 @@ AGENTS.md
 .codeium/
 .windsurf/
 .github/copilot-instructions.md
+/build-kde
+/kde/build
+/dist/arch/src
+/dist/arch/pkg
+/dist/arch/tuxedo-control
+/dist/arch/*.pkg.tar.*

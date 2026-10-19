@@ -1,0 +1,20 @@
+[Unit]
+Description=TUXEDO Uniwill fan, EC profile and keyboard control (tuxedo-controld)
+Documentation=https://github.com/AndrewDemsDS/tuxedo-control-nix
+After=systemd-modules-load.service
+# One fan controller at a time.
+Conflicts=tccd.service tailord.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tuxedo-controld /etc/tuxedo-control/config.json
+Restart=on-failure
+RestartSec=3
+StateDirectory=tuxedo-control
+Nice=-5
+# SIGTERM makes the daemon hand the fan back to the EC before exiting.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

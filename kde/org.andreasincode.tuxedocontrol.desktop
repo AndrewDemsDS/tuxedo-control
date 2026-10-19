@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=TUXEDO Control
+GenericName=Fan and Power Control
+Comment=Fan curves, EC performance profiles, keyboard backlight and charging for TUXEDO Uniwill laptops
+Exec=tuxedo-control-kde
+Icon=preferences-system-power-management
+Categories=Qt;KDE;System;Settings;HardwareSettings;
+Keywords=fan;tuxedo;power;battery;tlp;
+StartupNotify=true
