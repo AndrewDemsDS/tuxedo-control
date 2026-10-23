@@ -24,6 +24,11 @@ may change in any `0.y` release. See "Versioning" in the README.
   `max_brightness`; plus unit tests for fan-curve interpolation and the safety floor.
 
 ### Fixed
+- Fan on/off hunting near a curve's 0 -> first-duty step. With the CPU idling around the step,
+  the fan started and stopped every minute or so. A spinning fan now needs 3 C more margin than
+  `hysteresis_c` and 60 s of run time before it stops, and holds the curve's lowest duty until
+  then. Temperature smoothing is a float EMA over 10 samples (was an integer EMA over 3, which
+  also truncated and could sit several degrees below a steady reading).
 - Fan-duty oscillation ("hunting"): the control loop read the instantaneous temperature each
   tick and rewrote the fan duty on every 1 °C of sensor noise, so the fan audibly ramped up and
   down. It now EMA-smooths the temperature (curve follows the trend, not spikes) and applies a

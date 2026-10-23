@@ -17,7 +17,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tuxedoio::{PerfProfile, TuxedoIo};
 
 mod profiles;
@@ -25,8 +25,15 @@ use profiles::{Profile, Store};
 
 const SOCK_PATH: &str = "/run/tuxedo-control.sock";
 /// EMA window for temperature smoothing (anti fan-hunting): the curve reads an averaged temp
-/// instead of the noisy instantaneous sensor. Higher = smoother but slower to react.
-const TEMP_SMOOTH_N: i32 = 3;
+/// instead of the noisy instantaneous sensor. Higher = smoother but slower to react. At the
+/// default 2 s poll, 10 samples is a ~20 s time constant: long enough to ride out the
+/// 47 -> 60 C spikes a Ryzen package sensor shows under light load.
+const TEMP_SMOOTH_N: f64 = 10.0;
+/// Extra hysteresis (on top of `hysteresis_c`) before a spinning fan may stop. The step from
+/// 0 to the curve's first duty is the audible one, so stopping waits for a few more degrees.
+const FAN_OFF_EXTRA_C: i32 = 3;
+/// Once the fan starts, it keeps its lowest curve duty for at least this long before stopping.
+const FAN_MIN_ON: Duration = Duration::from_secs(60);
 /// Deadband: don't rewrite fan duty for curve-driven changes smaller than this many percent.
 /// Stops the fan oscillating on small temperature wobble; the safety floor still overrides it.
 const FAN_DEADBAND_PCT: i32 = 3;
@@ -190,6 +197,32 @@ fn chg_set(v: &str) -> std::io::Result<()> {
         ));
     }
     std::fs::write(format!("{}/charging_profile", chg_dir()), v)
+}
+
+/// The curve's duty for a smoothed temperature, given the duty commanded last tick.
+/// Rising follows the curve; falling lags by `hyst` degrees. Stopping a spinning fan needs
+/// `hyst + FAN_OFF_EXTRA_C` degrees of margin and `FAN_MIN_ON` of run time; until then the
+/// fan holds the curve's lowest nonzero duty, so it does not start and stop every minute.
+fn curve_duty(curve: &[(i32, i32)], temp: i32, prev: i32, hyst: i32, on_for: Duration) -> i32 {
+    let prev = prev.max(0);
+    let up = interp(curve, temp);
+    if up >= prev {
+        return up;
+    }
+    let down = interp(curve, temp + hyst).min(prev);
+    if down > 0 || prev == 0 {
+        return down;
+    }
+    if on_for >= FAN_MIN_ON && interp(curve, temp + hyst + FAN_OFF_EXTRA_C) == 0 {
+        return 0;
+    }
+    let floor = curve
+        .iter()
+        .map(|&(_, d)| d)
+        .filter(|&d| d > 0)
+        .min()
+        .unwrap_or(0);
+    floor.min(prev)
 }
 
 fn interp(curve: &[(i32, i32)], temp: i32) -> i32 {
@@ -553,7 +586,8 @@ fn main() {
     install_signals(term.clone());
 
     let mut commanded: i32 = -1;
-    let mut smoothed_temp: i32 = -1; // EMA state; <0 = unseeded (first tick)
+    let mut smoothed_temp: f64 = -1.0; // EMA state; <0 = unseeded (first tick)
+    let mut fan_on_since: Option<Instant> = None; // when the fan last started from 0
     let mut bad_temp_reads: u32 = 0;
     let mut ec_fallback = false; // true while the fan is handed back to the EC
     let debug = std::env::var_os("TUXEDO_DEBUG").is_some();
@@ -602,7 +636,8 @@ fn main() {
             eprintln!("CPU temperature reads recovered ({ct}C): resuming the fan curve");
             ec_fallback = false;
             commanded = -1;
-            smoothed_temp = -1;
+            smoothed_temp = -1.0;
+            fan_on_since = None;
         }
         bad_temp_reads = 0;
         {
@@ -610,18 +645,15 @@ fn main() {
             let temp_raw = ct.max(gt);
             // EMA-smooth the temperature so the fan follows the trend, not every sensor spike.
             // This is the main fix for audible up/down fan hunting. First tick seeds directly.
-            smoothed_temp = if smoothed_temp < 0 {
-                temp_raw
+            // Float state: an integer EMA truncates and can sit degrees below a steady reading.
+            smoothed_temp = if smoothed_temp < 0.0 {
+                f64::from(temp_raw)
             } else {
-                (smoothed_temp * (TEMP_SMOOTH_N - 1) + temp_raw) / TEMP_SMOOTH_N
+                (smoothed_temp * (TEMP_SMOOTH_N - 1.0) + f64::from(temp_raw)) / TEMP_SMOOTH_N
             };
-            let temp = smoothed_temp;
-            let up = interp(&curve, temp);
-            curve_target = if up >= commanded.max(0) {
-                up
-            } else {
-                interp(&curve, temp + cfg.hysteresis_c).min(commanded.max(0))
-            };
+            let temp = smoothed_temp.round() as i32;
+            let on_for = fan_on_since.map_or(Duration::ZERO, |t| t.elapsed());
+            curve_target = curve_duty(&curve, temp, commanded, cfg.hysteresis_c, on_for);
 
             let manual = shared.lock().unwrap().manual;
             let desired = manual.unwrap_or(curve_target);
@@ -642,6 +674,11 @@ fn main() {
                     "temp {temp_raw}C (avg {temp}C) -> fan {target}%{}",
                     if manual.is_some() { " (manual)" } else { "" }
                 );
+            }
+            if target == 0 {
+                fan_on_since = None;
+            } else if commanded <= 0 {
+                fan_on_since = Some(Instant::now());
             }
             commanded = target;
             cpu_fan = d.cpu_fan_pct().unwrap_or(0);
@@ -715,6 +752,49 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tuxedo-test-{}-{}", tag, std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    // ---- curve_duty (fan on/off hysteresis and minimum run time) ----
+
+    const QUIET: [(i32, i32); 6] = [(0, 0), (50, 0), (51, 20), (70, 33), (85, 70), (100, 100)];
+    const LONG: Duration = Duration::from_secs(120);
+
+    #[test]
+    fn curve_duty_starts_the_fan_on_the_curve() {
+        assert_eq!(curve_duty(&QUIET, 51, 0, 3, Duration::ZERO), 20);
+        assert_eq!(curve_duty(&QUIET, 50, 0, 3, Duration::ZERO), 0);
+    }
+
+    #[test]
+    fn curve_duty_holds_the_lowest_duty_during_min_run_time() {
+        // Cool enough to stop, but the fan only just started.
+        assert_eq!(curve_duty(&QUIET, 40, 20, 3, Duration::from_secs(10)), 20);
+        // Coming down from a higher duty, it settles on the floor rather than stopping.
+        assert_eq!(curve_duty(&QUIET, 40, 33, 3, Duration::from_secs(10)), 20);
+    }
+
+    #[test]
+    fn curve_duty_needs_the_extra_margin_to_stop() {
+        // 47 C: plain hysteresis would stop it (47 + 3 = 50 -> 0), the extra 3 C does not.
+        assert_eq!(curve_duty(&QUIET, 47, 20, 3, LONG), 20);
+        assert_eq!(curve_duty(&QUIET, 45, 20, 3, LONG), 20);
+        assert_eq!(curve_duty(&QUIET, 44, 20, 3, LONG), 0);
+    }
+
+    #[test]
+    fn curve_duty_falls_with_hysteresis_while_running() {
+        // 60 C on the way down reads the curve at 63 C, never above the previous duty.
+        assert_eq!(curve_duty(&QUIET, 60, 33, 3, LONG), interp(&QUIET, 63));
+        assert_eq!(curve_duty(&QUIET, 55, 24, 3, LONG), 24);
+    }
+
+    #[test]
+    fn curve_duty_unseeded_prev_behaves_like_off() {
+        assert_eq!(curve_duty(&QUIET, 40, -1, 3, Duration::ZERO), 0);
+        assert_eq!(
+            curve_duty(&QUIET, 60, -1, 3, Duration::ZERO),
+            interp(&QUIET, 60)
+        );
     }
 
     // ---- interp (fan-curve interpolation) ----
