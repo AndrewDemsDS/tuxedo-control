@@ -51,6 +51,7 @@ package_tuxedo-control-git() {
     install -Dm755 target/release/tuxedo-tui "$pkgdir/usr/bin/tuxedo-tui"
     install -Dm755 target/release/tuxedo-prober "$pkgdir/usr/bin/tuxedo-prober"
     install -Dm644 dist/systemd/tuxedo-control.service "$pkgdir/usr/lib/systemd/system/tuxedo-control.service"
+    install -Dm644 dist/systemd/tuxedo-control-sleep.service "$pkgdir/usr/lib/systemd/system/tuxedo-control-sleep.service"
     install -Dm644 dist/systemd/tuxedo-control.conf "$pkgdir/usr/lib/modules-load.d/tuxedo-control.conf"
     install -Dm644 dist/arch/config.json.example "$pkgdir/etc/tuxedo-control/config.json"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

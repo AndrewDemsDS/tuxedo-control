@@ -140,5 +140,20 @@ in
         Nice = -5;
       };
     };
+
+    # Hibernation resets the EC (profile lost, EC takes the fan back). Stop the daemon across
+    # sleep and start it on resume so its EC setup runs again. Same pattern as tccd-sleep.
+    systemd.services.tuxedo-control-sleep = {
+      description = "Stop tuxedo-controld across sleep and start it again on resume";
+      wantedBy = [ "sleep.target" ];
+      before = [ "sleep.target" ];
+      unitConfig.StopWhenUnneeded = true;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${config.systemd.package}/bin/systemctl stop tuxedo-control.service";
+        ExecStop = "${config.systemd.package}/bin/systemctl start tuxedo-control.service";
+      };
+    };
   };
 }

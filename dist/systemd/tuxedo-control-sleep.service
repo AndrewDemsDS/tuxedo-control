@@ -1,0 +1,17 @@
+[Unit]
+Description=Stop tuxedo-controld across sleep and start it again on resume
+# Hibernation resets the EC: the performance profile is lost and the EC takes the fan back,
+# so after resume the EC's auto control and the daemon's duty writes fight each other.
+# Stopping before sleep hands the fan to the EC cleanly, and the start on resume re-runs the
+# daemon's EC setup. Same pattern as TCC's tccd-sleep.service.
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/systemctl stop tuxedo-control.service
+ExecStop=/usr/bin/systemctl start tuxedo-control.service
+
+[Install]
+WantedBy=sleep.target

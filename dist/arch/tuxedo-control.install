@@ -3,6 +3,7 @@ post_install() {
 ==> tuxedo-controld drives the fan through /dev/tuxedo_io. Only one fan controller may run:
 ==>   sudo systemctl disable --now tccd tccd-sleep    # TUXEDO Control Center, if installed
 ==>   sudo systemctl enable --now tuxedo-control
+==>   sudo systemctl enable tuxedo-control-sleep    # re-initialise the EC after resume
 ==> The unit Conflicts= with tccd and tailord, so starting it stops them.
 ==> Boards outside the validated list run read-only (no fan or EC writes).
 ==> With TLP: install tuxedo-tlp-git and enable tuxedo-tlp-controld-sync to follow
