@@ -9,11 +9,20 @@ may change in any `0.y` release. See "Versioning" in the README.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
 ### Changed
 - Renamed the project from `tuxedo-control-nix` to Tuxedo Control (`tuxedo-control`). It runs
   on any systemd distribution; the NixOS module stays. The old GitHub URL redirects.
 
 ### Added
+- Arch Linux packaging (`dist/arch/PKGBUILD`): `tuxedo-control-git` (daemon, TUI, prober,
+  systemd units, `modules-load.d` entry) and `tuxedo-control-kde-git`, a Kirigami (Qt 6) GUI
+  for Plasma with live status, named profiles with a drag-to-edit fan curve, EC performance
+  mode, manual fan, keyboard backlight, charging, TCC import and a TLP power-profile selector.
+- `STATUS` carries `ready`, false until the loop's first EC reading (about 13 s after start on
+  the reference board). Until then it used to report zeroed temperatures. The KDE app shows a
+  waiting banner meanwhile.
 - Model gating via `R_UW_MODEL_ID` (generalise safely beyond the Gen9 reference board). The
   `tuxedoio` library refuses EC writes on any board whose model id is not in a known-models
   registry (`TuxedoIo::open`), so an unvalidated board runs read-only; the prober uses
@@ -28,6 +37,10 @@ may change in any `0.y` release. See "Versioning" in the README.
   `max_brightness`; plus unit tests for fan-curve interpolation and the safety floor.
 
 ### Fixed
+- The daemon never steers the fan from an implausible CPU temperature (read error, <= 0 or
+  >= 120 C). A 0 C read could switch the fan off while the CPU was hot. After three bad reads
+  in a row it hands the fan back to the EC and resumes the curve once reads recover.
+  `TUXEDO_DEBUG=1` logs the raw reads every tick.
 - Fan revving irregularly after resume from hibernation. Hibernation resets the EC (performance
   profile lost, EC back on its own fan control) and the daemon never re-ran its EC setup. New
   `tuxedo-control-sleep.service` stops the daemon before sleep and starts it on resume, the
@@ -86,6 +99,7 @@ may change in any `0.y` release. See "Versioning" in the README.
   `tuxedo_io` v0.3.9). Other boards are unverified. See "Supported hardware".
 - The driver enforces a ~25% on-speed floor; a requested duty below ~12% becomes 0 (off).
 
-[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AndrewDemsDS/tuxedo-control/releases/tag/v0.1.0

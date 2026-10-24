@@ -1,6 +1,6 @@
 [package]
 name = "tuxedo-gui"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "libadwaita GUI for TUXEDO Uniwill fan/performance control (talks to tuxedo-controld)"
 license = "MIT"

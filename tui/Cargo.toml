@@ -1,6 +1,6 @@
 [package]
 name = "tuxedo-tui"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Live TUI dashboard for TUXEDO Uniwill: temps, fan duty, perf profile"
 license = "MIT"
