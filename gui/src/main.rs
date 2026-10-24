@@ -150,8 +150,8 @@ fn build_ui(app: &adw::Application) {
                     "Declarative fan and performance control for TUXEDO Uniwill laptops, \
                      via the tuxedo_io kernel interface.",
                 )
-                .website("https://github.com/AndrewDemsDS/tuxedo-control-nix")
-                .issue_url("https://github.com/AndrewDemsDS/tuxedo-control-nix/issues")
+                .website("https://github.com/AndrewDemsDS/tuxedo-control")
+                .issue_url("https://github.com/AndrewDemsDS/tuxedo-control/issues")
                 .license_type(gtk::License::MitX11)
                 .developers(vec!["Andreas Demosthenous".to_string()])
                 .copyright("© 2026 Andreas Demosthenous")

@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
                      i18n("Fan, EC profile, keyboard and charging control for TUXEDO Uniwill laptops"),
                      KAboutLicense::MIT);
     about.setDesktopFileName(QStringLiteral("org.andreasincode.tuxedocontrol"));
-    about.setHomepage(QStringLiteral("https://github.com/AndrewDemsDS/tuxedo-control-nix"));
+    about.setHomepage(QStringLiteral("https://github.com/AndrewDemsDS/tuxedo-control"));
     KAboutData::setApplicationData(about);
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("preferences-system-power-management")));
 

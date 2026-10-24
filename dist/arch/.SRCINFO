@@ -2,7 +2,7 @@ pkgbase = tuxedo-control-git
 	pkgdesc = Fan curves, EC performance profiles, keyboard backlight and charging for TUXEDO Uniwill laptops
 	pkgver = r0
 	pkgrel = 1
-	url = https://github.com/AndrewDemsDS/tuxedo-control-nix
+	url = https://github.com/AndrewDemsDS/tuxedo-control
 	arch = x86_64
 	license = MIT
 	makedepends = git
@@ -13,7 +13,7 @@ pkgbase = tuxedo-control-git
 	makedepends = kirigami
 	makedepends = ki18n
 	makedepends = kcoreaddons
-	source = tuxedo-control::git+https://github.com/AndrewDemsDS/tuxedo-control-nix.git
+	source = tuxedo-control::git+https://github.com/AndrewDemsDS/tuxedo-control.git
 	sha256sums = SKIP
 
 pkgname = tuxedo-control-git

@@ -9,6 +9,10 @@ may change in any `0.y` release. See "Versioning" in the README.
 
 ## [Unreleased]
 
+### Changed
+- Renamed the project from `tuxedo-control-nix` to Tuxedo Control (`tuxedo-control`). It runs
+  on any systemd distribution; the NixOS module stays. The old GitHub URL redirects.
+
 ### Added
 - Model gating via `R_UW_MODEL_ID` (generalise safely beyond the Gen9 reference board). The
   `tuxedoio` library refuses EC writes on any board whose model id is not in a known-models
@@ -82,6 +86,6 @@ may change in any `0.y` release. See "Versioning" in the README.
   `tuxedo_io` v0.3.9). Other boards are unverified. See "Supported hardware".
 - The driver enforces a ~25% on-speed floor; a requested duty below ~12% becomes 0 (off).
 
-[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control-nix/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/AndrewDemsDS/tuxedo-control-nix/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/AndrewDemsDS/tuxedo-control-nix/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/AndrewDemsDS/tuxedo-control/releases/tag/v0.1.0

@@ -1,10 +1,15 @@
-# tuxedo-control-nix
+# Tuxedo Control
 
-A NixOS-native, **declarative** replacement for TUXEDO laptop hardware control (fan
-curves, performance profiles, keyboard backlight and charging profiles), built by
-reverse-engineering the `tuxedo_io` kernel ioctl interface.
+A small replacement for TUXEDO laptop hardware control (fan curves, performance profiles,
+keyboard backlight and charging profiles) that runs on any Linux distribution with
+systemd. It was built by reverse-engineering the `tuxedo_io` kernel ioctl interface.
 
-[![CI](https://github.com/AndrewDemsDS/tuxedo-control-nix/actions/workflows/ci.yml/badge.svg)](https://github.com/AndrewDemsDS/tuxedo-control-nix/actions/workflows/ci.yml)
+It ships as a Rust daemon (`tuxedo-controld`) with a CLI prober, a TUI, a GTK4 GUI and a
+KDE (Kirigami) GUI. There is an Arch package ([Arch Linux and KDE](#arch-linux-and-kde)),
+a NixOS module and flake ([NixOS](#nixos)), and a plain `cargo build` plus systemd units
+for everything else.
+
+[![CI](https://github.com/AndrewDemsDS/tuxedo-control/actions/workflows/ci.yml/badge.svg)](https://github.com/AndrewDemsDS/tuxedo-control/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > ⚠️ **Safety.** This drives a **root daemon that writes to your laptop's embedded
@@ -15,36 +20,25 @@ reverse-engineering the `tuxedo_io` kernel ioctl interface.
 
 ## Why this exists
 
-On NixOS, TUXEDO hardware control has two unsatisfying options:
+TUXEDO hardware control on Linux has two unsatisfying options:
 
-1. **TUXEDO Control Center (TCC)**: the official Electron app + `tccd` daemon. **Not
-   packaged in nixpkgs**, and an Electron/Node app is awkward to package declaratively.
-2. **tuxedo-rs / tailord**: a Rust daemon *is* in nixpkgs (`hardware.tuxedo-rs`), but its
-   fan control **misbehaves on some Uniwill-based AMD models**. On the reference machine
-   (TUXEDO **InfinityBook Pro AMD Gen9**, board `GXxHRXx`) tailord kept the fan loud at a
-   cold idle: a GUI-set `enthusiast` performance profile stuck, and re-applying `power_save`
-   over D-Bus did **not** quiet the fan at 35 °C even though the active curve was 0 % below
-   49 °C. Disabling tailord and handing the fan back to the EC was the only fix that worked.
+1. **TUXEDO Control Center (TCC)**: the official Electron app + `tccd` daemon. It is a
+   large Node/Electron install (about 450 MiB on Arch), and it is not packaged at all on
+   some distributions (nixpkgs, for one).
+2. **tuxedo-rs / tailord**: a Rust daemon, but its fan control **misbehaves on some
+   Uniwill-based AMD models**. On the reference machine (TUXEDO **InfinityBook Pro AMD
+   Gen9**, board `GXxHRXx`) tailord kept the fan loud at a cold idle: a GUI-set
+   `enthusiast` performance profile stuck, and re-applying `power_save` over D-Bus did
+   **not** quiet the fan at 35 °C even though the active curve was 0 % below 49 °C.
+   Disabling tailord and handing the fan back to the EC was the only fix that worked.
 
 Both `tccd` and `tailord` drive the **same kernel interface**, `/dev/tuxedo_io`
 (`tuxedo_io.ko`, from the GPL `tuxedo-drivers`). The plan: understand that ioctl protocol
-directly, build a small correct daemon, and wrap it in a first-class NixOS module. No
+directly, build a small correct daemon, and package it for the distributions in use. No
 Electron, no guessing.
 
-## Goal
-
-```nix
-services.tuxedo-control = {
-  enable = true;
-  fan.curve = [ { temp = 25; speed = 0; } { temp = 50; speed = 0; } /* … */ ];
-  performanceProfile = "power_save";        # decoupled from the fan curve
-  charging.profile = "stationary";          # stationary | balanced | high_capacity
-  keyboard.backlight.brightness = 2;        # 0..max_brightness (0–4 on the reference board)
-};
-```
-
-A pure, declarative module that works on AMD/Uniwill boards, plus a flake
-output for the daemon and a dev shell for the RE work.
+The project started as a NixOS module (it was called `tuxedo-control-nix`), so the
+declarative NixOS module is still the most complete configuration surface.
 
 ## Status: all phases working on the reference machine ✅
 
@@ -82,7 +76,9 @@ sudo ./target/release/tuxedo-prober auto     # hand back to the EC
 sudo ./target/release/tuxedo-tui             # live dashboard
 ```
 
-On NixOS, add this flake as an input and enable the module:
+## NixOS
+
+Add this flake as an input and enable the module:
 
 ```nix
 services.tuxedo-control = {
@@ -99,8 +95,7 @@ services.tuxedo-control = {
 
 ## Arch Linux and KDE
 
-The daemon is not NixOS-specific. [`dist/arch/PKGBUILD`](dist/arch/PKGBUILD) builds two
-packages:
+[`dist/arch/PKGBUILD`](dist/arch/PKGBUILD) builds two packages:
 
 - `tuxedo-control-git`: `tuxedo-controld`, the TUI, the prober, a systemd unit and a
   `modules-load.d` entry for `tuxedo_io`.
@@ -113,9 +108,15 @@ packages:
 cd dist/arch && makepkg -si
 sudo systemctl disable --now tccd tccd-sleep     # one fan controller at a time
 sudo systemctl enable --now tuxedo-control
+sudo systemctl enable tuxedo-control-sleep       # re-initialise the EC after resume
 ```
 
-The unit declares `Conflicts=tccd.service tailord.service`. Stopping it sends SIGTERM,
+Other distributions: `cargo build --release`, install the binaries to `/usr/bin`, and copy
+the units from [`dist/systemd/`](dist/systemd) (plus `tuxedo-control.conf` to
+`/etc/modules-load.d/`).
+
+`tuxedo-control-sleep.service` stops the daemon before sleep and starts it on resume:
+hibernation resets the EC, and the daemon's start-up sets it up again. The main unit declares `Conflicts=tccd.service tailord.service`. Stopping it sends SIGTERM,
 and the daemon hands the fan back to the EC before it exits.
 
 ### With TLP

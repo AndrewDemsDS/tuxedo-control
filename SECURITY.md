@@ -1,6 +1,6 @@
 # Security Policy
 
-`tuxedo-control-nix` ships a **daemon that runs as root** and writes to a laptop's
+Tuxedo Control ships a **daemon that runs as root** and writes to a laptop's
 embedded controller (EC) through the `tuxedo_io` kernel ioctl interface
 (`/dev/tuxedo_io`, EC RAM offsets such as `0x0751`, raw fan-duty registers). A bug or a
 crafted configuration could set an unsafe fan state, write unexpected EC registers, or

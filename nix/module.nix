@@ -31,12 +31,12 @@ let
 in
 {
   options.services.tuxedo-control = {
-    enable = lib.mkEnableOption "declarative TUXEDO Uniwill fan/performance control (tuxedo-control-nix)";
+    enable = lib.mkEnableOption "declarative TUXEDO Uniwill fan/performance control (tuxedo-control)";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.system}.default;
-      defaultText = lib.literalExpression "tuxedo-control-nix.packages.\${system}.default";
+      defaultText = lib.literalExpression "tuxedo-control.packages.\${system}.default";
       description = "The tuxedo-control package providing tuxedo-controld.";
     };
 
@@ -127,7 +127,7 @@ in
     hardware.tuxedo-rs.enable = lib.mkForce false;
 
     systemd.services.tuxedo-control = {
-      description = "TUXEDO Uniwill fan/performance control (tuxedo-control-nix)";
+      description = "TUXEDO Uniwill fan/performance control (tuxedo-control)";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-modules-load.service" ];
       serviceConfig = {

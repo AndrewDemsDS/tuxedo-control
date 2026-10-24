@@ -1,6 +1,6 @@
 [Unit]
 Description=TUXEDO Uniwill fan, EC profile and keyboard control (tuxedo-controld)
-Documentation=https://github.com/AndrewDemsDS/tuxedo-control-nix
+Documentation=https://github.com/AndrewDemsDS/tuxedo-control
 After=systemd-modules-load.service
 # One fan controller at a time.
 Conflicts=tccd.service tailord.service

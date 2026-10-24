@@ -1,5 +1,5 @@
 {
-  description = "tuxedo-control-nix: declarative TUXEDO Uniwill fan/performance control via the tuxedo_io ioctl interface";
+  description = "Tuxedo Control: TUXEDO Uniwill fan/performance control via the tuxedo_io ioctl interface";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -69,7 +69,7 @@
             strace ltrace ripgrep jq
           ];
           shellHook = ''
-            echo "tuxedo-control-nix dev shell"
+            echo "tuxedo-control dev shell"
             echo "  /dev/tuxedo_io: $( [ -e /dev/tuxedo_io ] && echo present || echo MISSING )"
             echo "  build: cargo build --release   |   probe: sudo ./target/release/tuxedo-prober info"
           '';
