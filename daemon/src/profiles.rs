@@ -148,10 +148,22 @@ pub fn load() -> Store {
 }
 
 pub fn save(s: &Store) -> std::io::Result<()> {
-    if let Some(dir) = std::path::Path::new(STORE_PATH).parent() {
+    save_to(std::path::Path::new(STORE_PATH), s)
+}
+
+/// Write via a synced temp file and rename. A plain truncate-and-write left an empty or partial
+/// file if power failed or a hibernate never resumed mid-write, and `load` then silently fell
+/// back to the built-ins, dropping every user profile.
+fn save_to(path: &std::path::Path, s: &Store) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(STORE_PATH, serde_json::to_string_pretty(s)?)
+    let tmp = path.with_extension("json.tmp");
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(serde_json::to_string_pretty(s)?.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, path)
 }
 
 // ---- TCC import ----
@@ -227,4 +239,23 @@ pub fn import_tcc(json: &str) -> Result<Vec<Profile>, String> {
             })
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_replaces_the_store_atomically() {
+        let dir = std::env::temp_dir().join(format!("tuxedo-store-{}", std::process::id()));
+        let path = dir.join("profiles.json");
+        let mut s = default_store();
+        save_to(&path, &s).unwrap();
+        s.active = "Office".into();
+        save_to(&path, &s).unwrap();
+        let back: Store = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.active, "Office");
+        assert!(!path.with_extension("json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

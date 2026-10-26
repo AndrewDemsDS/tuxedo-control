@@ -42,6 +42,9 @@ may change in any `0.y` release. See "Versioning" in the README.
 - One socket client that connected and never sent a full line blocked the daemon's control
   socket for every other client (the GUI froze) because requests are served one at a time with
   no read timeout. Clients now time out after 2 s and a request line is capped at 64 KiB.
+- A power loss or failed resume while the profile store was being written could leave
+  `profiles.json` empty or truncated, and the next start silently reset to the built-in
+  profiles. The store is now written to a synced temp file and renamed into place.
 
 ## [0.3.0] - 2026-10-24
 
