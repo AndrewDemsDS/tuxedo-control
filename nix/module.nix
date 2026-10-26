@@ -141,6 +141,9 @@ in
         RestartSec = 3;
         StateDirectory = "tuxedo-control"; # /var/lib/tuxedo-control for the profiles store
         # restore_auto() runs on SIGTERM in the daemon, so a clean stop hands the fan to the EC.
+        # The first fan write after start takes ~13 s (EC fan-table init); don't SIGKILL a stop
+        # that lands inside it, and don't let a hung stop hold up suspend for the default 90 s.
+        TimeoutStopSec = 30;
         Nice = -5;
       };
     };

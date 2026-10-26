@@ -47,6 +47,20 @@ fn plausible_temp(t: i32) -> bool {
     t > 0 && t < 120
 }
 
+/// Sleep for `d`, waking early once `term` is set. A plain sleep of the poll interval delayed
+/// SIGTERM (and so the stop before suspend) by up to `poll_seconds`, and a long interval could
+/// outlast `TimeoutStopSec`, so systemd killed the daemon before it handed the fan back.
+fn sleep_unless(term: &AtomicBool, d: Duration) {
+    let end = Instant::now() + d;
+    while !term.load(Ordering::Relaxed) {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(100)));
+    }
+}
+
 /// Apply a profile's perf mode + (optional) keyboard backlight + charge profile.
 /// The control loop reads the fan curve live from the active profile.
 fn apply_profile(dev: &Arc<Mutex<TuxedoIo>>, shared: &Arc<Mutex<Shared>>, p: &Profile) {
@@ -591,6 +605,8 @@ fn main() {
     let mut bad_temp_reads: u32 = 0;
     let mut ec_fallback = false; // true while the fan is handed back to the EC
     let debug = std::env::var_os("TUXEDO_DEBUG").is_some();
+    // poll_seconds = 0 would spin on the EC with no pause at all.
+    let poll = Duration::from_secs(cfg.poll_seconds.max(1));
     while !term.load(Ordering::Relaxed) {
         // Hold the device lock for the whole tick's ioctls (reads + fan write), then release.
         let (ct, gt, cpu_fan, gpu_fan, mode);
@@ -629,7 +645,7 @@ fn main() {
                 s.cpu_temp = ct;
                 s.gpu_temp = gt;
             }
-            std::thread::sleep(Duration::from_secs(cfg.poll_seconds));
+            sleep_unless(&term, poll);
             continue;
         }
         if ec_fallback {
@@ -640,6 +656,11 @@ fn main() {
             fan_on_since = None;
         }
         bad_temp_reads = 0;
+        // The fan write below can take many seconds (the first one after start or after
+        // FANAUTO re-initialises the EC fan tables), so don't start it once asked to stop.
+        if term.load(Ordering::Relaxed) {
+            break;
+        }
         {
             let d = dev.lock().unwrap();
             let temp_raw = ct.max(gt);
@@ -710,7 +731,7 @@ fn main() {
             s.charge = charge;
             s.ready = true;
         }
-        std::thread::sleep(Duration::from_secs(cfg.poll_seconds));
+        sleep_unless(&term, poll);
     }
 
     // Only hand the fan back to the EC if we ever took it (read-only never touched it).
@@ -972,6 +993,19 @@ mod tests {
         kbd_write(d, -5).unwrap();
         assert_eq!(kbd_read(d, "brightness"), 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sleep_unless_wakes_early_on_term() {
+        let term = AtomicBool::new(true);
+        let t = Instant::now();
+        sleep_unless(&term, Duration::from_secs(30));
+        assert!(t.elapsed() < Duration::from_secs(1));
+
+        let term = AtomicBool::new(false);
+        let t = Instant::now();
+        sleep_unless(&term, Duration::from_millis(150));
+        assert!(t.elapsed() >= Duration::from_millis(150));
     }
 
     #[test]

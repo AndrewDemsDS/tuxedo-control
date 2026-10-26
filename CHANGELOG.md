@@ -19,6 +19,11 @@ may change in any `0.y` release. See "Versioning" in the README.
   `RestartSec=3` systemd's default start limit (5 starts in 10 s) never trips, so a failing
   start looped every 3 s all night. The unit now allows 10 starts in 120 s, enough to wait for
   `uniwill_wmi` at boot, and then stays failed.
+- A stop (including the one before suspend) could SIGKILL the daemon before it handed the fan
+  back to the EC. The loop slept a full poll interval before noticing SIGTERM, and the first
+  fan write after start (EC fan-table init, ~13 s) outlasted `TimeoutStopSec=10`. The loop now
+  wakes on SIGTERM, skips the fan write once asked to stop, and the unit allows 30 s (the
+  NixOS unit had no limit and used systemd's 90 s). `poll_seconds = 0` no longer busy-loops.
 
 ## [0.3.0] - 2026-10-24
 

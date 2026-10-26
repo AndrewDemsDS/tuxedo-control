@@ -17,9 +17,11 @@ Restart=on-failure
 RestartSec=3
 StateDirectory=tuxedo-control
 Nice=-5
-# SIGTERM makes the daemon hand the fan back to the EC before exiting.
+# SIGTERM makes the daemon hand the fan back to the EC before exiting. The first fan write
+# after start re-initialises the EC fan tables and takes ~13 s on the reference board; a stop
+# that lands inside it must not be cut short by SIGKILL, or the fan is never handed back.
 KillSignal=SIGTERM
-TimeoutStopSec=10
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
