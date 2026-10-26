@@ -170,6 +170,30 @@ impl EcBackend for DeviceBackend {
     }
 }
 
+/// Open `/dev/tuxedo_io` and run the Uniwill identify ioctl before anything else.
+///
+/// tuxedo_io caches the Uniwill feature table (`uw_feats`) only when `uniwill_identify()`
+/// succeeds, at module init or on `R_HWCHECK_UW`. If the module loads before uniwill_wmi has
+/// registered its interface (modules-load.d runs early), init leaves `uw_feats` NULL and every
+/// other `R_UW_*` read that touches it (e.g. `R_UW_MODEL_ID`) is a kernel NULL dereference that
+/// oopses with IRQs off. `R_HWCHECK_UW` re-runs identify, so it must be the first Uniwill call;
+/// a negative answer is an error here, never a reason to carry on.
+fn open_device() -> io::Result<DeviceBackend> {
+    let dev = DeviceBackend {
+        file: OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tuxedo_io")?,
+    };
+    if dev.rd(R_HWCHECK_UW)? != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "tuxedo_io: Uniwill interface not identified (uniwill_wmi not ready or not a Uniwill board)",
+        ));
+    }
+    Ok(dev)
+}
+
 pub struct TuxedoIo {
     backend: Box<dyn EcBackend>,
     /// Writes (fan duty, perf, mode, fan-auto) are refused unless the board is validated.
@@ -183,23 +207,13 @@ impl TuxedoIo {
     /// behaviour is unknown). Use [`TuxedoIo::open_unchecked`] for the prober, which must be
     /// able to write in order to validate a new board.
     pub fn open() -> io::Result<Self> {
-        Ok(Self::from_backend(Box::new(DeviceBackend {
-            file: OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open("/dev/tuxedo_io")?,
-        })))
+        Ok(Self::from_backend(Box::new(open_device()?)))
     }
 
     /// Open WITHOUT the model write-gate. Reserved for the prober's source-first validation
     /// of a new board (reads first, then writes with `auto` as the bail-out).
     pub fn open_unchecked() -> io::Result<Self> {
-        Ok(Self::from_backend_unchecked(Box::new(DeviceBackend {
-            file: OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open("/dev/tuxedo_io")?,
-        })))
+        Ok(Self::from_backend_unchecked(Box::new(open_device()?)))
     }
 
     /// Wrap any backend, applying the model write-gate: reads the model id and allows writes

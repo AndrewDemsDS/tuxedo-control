@@ -9,6 +9,13 @@ may change in any `0.y` release. See "Versioning" in the README.
 
 ## [Unreleased]
 
+### Fixed
+- Kernel NULL dereference in tuxedo_io on every daemon start when `tuxedo_io` loaded before
+  `uniwill_wmi` (the `modules-load.d` entry makes that the normal case). The library read
+  `R_UW_MODEL_ID` before `R_HWCHECK_UW`, so tuxedo_io's feature table was still NULL. Every
+  open now runs the identify ioctl first and fails cleanly if the interface is not ready; the
+  unit's restart retries until it is.
+
 ## [0.3.0] - 2026-10-24
 
 ### Changed
