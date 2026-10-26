@@ -33,6 +33,12 @@ may change in any `0.y` release. See "Versioning" in the README.
 - One failed EC read during the driver's model probe left a validated board read-only until
   the next restart. The driver caches model id 0 on that error and re-probes on the next
   identify; the write gate now re-runs `R_HWCHECK_UW` (up to 3 times) before accepting 0.
+- After hibernation the daemon's fan writes could be silently ignored. tuxedo_io programs the
+  EC's custom fan table only on the first write after load or after `FANAUTO`, and that state
+  survives sleep while the EC is reset. The daemon now issues `FANAUTO` at startup (covers a
+  previously killed instance) and, when it detects a resume itself (CLOCK_BOOTTIME jumping
+  ahead of CLOCK_MONOTONIC), re-runs that setup and re-applies the perf profile. This no
+  longer depends on `tuxedo-control-sleep.service` being enabled.
 
 ## [0.3.0] - 2026-10-24
 

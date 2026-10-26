@@ -47,6 +47,33 @@ fn plausible_temp(t: i32) -> bool {
     t > 0 && t < 120
 }
 
+/// Hand the fan back to the driver and re-apply the perf profile. tuxedo_io programs the EC's
+/// custom fan table only on the first fan write after load or after FANAUTO (its
+/// `fans_initialized` flag). That flag survives sleep and a SIGKILLed daemon, while hibernation
+/// resets the EC (fan table off, 0x0751 back to 0), so later duty writes were silently ignored
+/// and the EC's own control fought ours. FANAUTO clears the flag; the next write re-inits.
+fn reinit_ec(d: &TuxedoIo, perf: Option<PerfProfile>) {
+    let _ = d.restore_auto();
+    if let Some(p) = perf {
+        let _ = d.set_perf(p);
+    }
+}
+
+/// Total time the system has spent suspended: CLOCK_BOOTTIME counts sleep, CLOCK_MONOTONIC
+/// does not, and both are slewed alike, so the gap only grows across a suspend or hibernate.
+fn suspended_total() -> Duration {
+    fn clock(id: libc::clockid_t) -> Duration {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe { libc::clock_gettime(id, &mut ts) };
+        Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+    }
+    let mono = clock(libc::CLOCK_MONOTONIC);
+    clock(libc::CLOCK_BOOTTIME).saturating_sub(mono)
+}
+
 /// Sleep for `d`, waking early once `term` is set. A plain sleep of the poll interval delayed
 /// SIGTERM (and so the stop before suspend) by up to `poll_seconds`, and a long interval could
 /// outlast `TimeoutStopSec`, so systemd killed the daemon before it handed the fan back.
@@ -599,6 +626,13 @@ fn main() {
     let term = Arc::new(AtomicBool::new(false));
     install_signals(term.clone());
 
+    // A previous instance that was killed (or a resume the sleep unit did not cover) can leave
+    // the driver believing its fan table is still programmed. Reset it before the first write.
+    if !read_only {
+        dev.lock().unwrap().restore_auto().ok();
+    }
+    let mut last_suspended = suspended_total();
+
     let mut commanded: i32 = -1;
     let mut smoothed_temp: f64 = -1.0; // EMA state; <0 = unseeded (first tick)
     let mut fan_on_since: Option<Instant> = None; // when the fan last started from 0
@@ -608,6 +642,18 @@ fn main() {
     // poll_seconds = 0 would spin on the EC with no pause at all.
     let poll = Duration::from_secs(cfg.poll_seconds.max(1));
     while !term.load(Ordering::Relaxed) {
+        // Resumed from sleep while running (no tuxedo-control-sleep.service, or it raced):
+        // the EC may have been reset under us, so redo the setup a fresh start would do.
+        let suspended = suspended_total();
+        if suspended.saturating_sub(last_suspended) > Duration::from_secs(1) && !read_only {
+            eprintln!("resumed from sleep: re-initialising EC fan control and perf profile");
+            let perf = PerfProfile::from_name(&shared.lock().unwrap().profile);
+            reinit_ec(&dev.lock().unwrap(), perf);
+            commanded = -1;
+            smoothed_temp = -1.0;
+            fan_on_since = None;
+        }
+        last_suspended = suspended;
         // Hold the device lock for the whole tick's ioctls (reads + fan write), then release.
         let (ct, gt, cpu_fan, gpu_fan, mode);
         let curve_target;
@@ -1006,6 +1052,28 @@ mod tests {
         let t = Instant::now();
         sleep_unless(&term, Duration::from_millis(150));
         assert!(t.elapsed() >= Duration::from_millis(150));
+    }
+
+    #[test]
+    fn reinit_ec_restores_driver_fan_state_and_perf() {
+        use tuxedoio::sim::{mock, MODELS};
+        let fix = MODELS.iter().find(|f| f.is_validated()).copied().unwrap();
+        let (dev, ec) = mock(fix);
+        dev.set_perf(PerfProfile::PowerSave).unwrap();
+        dev.set_fan_pct(40).unwrap();
+        // Hibernation: the EC comes back with 0x0751 = 0 and its own fan control.
+        ec.lock().unwrap().reg_0751 = 0;
+        reinit_ec(&dev, Some(PerfProfile::PowerSave));
+        let st = *ec.lock().unwrap();
+        assert!(st.auto, "FANAUTO must reset the driver's fan-table state");
+        assert_eq!(st.reg_0751 & 0xb0, 0xa0, "perf profile must be re-applied");
+    }
+
+    #[test]
+    fn suspended_total_is_stable_while_awake() {
+        let a = suspended_total();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(suspended_total().saturating_sub(a) < Duration::from_secs(1));
     }
 
     #[test]
