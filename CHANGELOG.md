@@ -49,6 +49,9 @@ may change in any `0.y` release. See "Versioning" in the README.
   from `SAVEPROFILE` and TCC imports): a panic in debug builds, and in release a wrapped,
   possibly negative duty that switched the fan off. The math is now done in `i128` and the
   duty is clamped to 0..=100.
+- Quitting `tuxedo-tui` after a `+`/`-` fan nudge left the fan pinned at that duty (even 0 %)
+  with nothing driving it, since the TUI runs with the daemon stopped. It now restores EC
+  automatic control on exit when it set a manual duty.
 
 ## [0.3.0] - 2026-10-24
 

@@ -129,6 +129,11 @@ fn main() -> std::io::Result<()> {
         }
         Ok(())
     })();
+    // A +/- nudge leaves the EC's custom fan table holding that duty (from 0 up to 115 C) and
+    // nothing else is driving the fan while the daemon is stopped, so hand it back on exit.
+    if manual.is_some() {
+        let _ = d.restore_auto();
+    }
     execute!(stdout(), terminal::LeaveAlternateScreen, cursor::Show)?;
     terminal::disable_raw_mode()?;
     res
