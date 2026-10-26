@@ -130,6 +130,10 @@ in
       description = "TUXEDO Uniwill fan/performance control (tuxedo-control)";
       wantedBy = [ "multi-user.target" ];
       after = [ "systemd-modules-load.service" ];
+      # Retry while uniwill_wmi comes up at boot, then give up instead of restarting forever
+      # (with RestartSec=3 the default 5-in-10s limit never trips).
+      startLimitIntervalSec = 120;
+      startLimitBurst = 10;
       serviceConfig = {
         # getExe' picks the explicit binary; getExe would resolve mainProgram (the GUI), not the daemon.
         ExecStart = "${lib.getExe' cfg.package "tuxedo-controld"} ${configFile}";

@@ -4,6 +4,11 @@ Documentation=https://github.com/AndrewDemsDS/tuxedo-control
 After=systemd-modules-load.service
 # One fan controller at a time.
 Conflicts=tccd.service tailord.service
+# Retry while uniwill_wmi comes up at boot, then give up instead of restarting forever. With
+# RestartSec=3 the default limit (5 starts in 10 s) never trips, so a daemon that can never
+# start (missing interface, kernel oops on open) looped every 3 s all night.
+StartLimitIntervalSec=120
+StartLimitBurst=10
 
 [Service]
 Type=simple

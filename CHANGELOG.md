@@ -15,6 +15,10 @@ may change in any `0.y` release. See "Versioning" in the README.
   `R_UW_MODEL_ID` before `R_HWCHECK_UW`, so tuxedo_io's feature table was still NULL. Every
   open now runs the identify ioctl first and fails cleanly if the interface is not ready; the
   unit's restart retries until it is.
+- The daemon unit (Arch and NixOS) restarted forever when the daemon could not start. With
+  `RestartSec=3` systemd's default start limit (5 starts in 10 s) never trips, so a failing
+  start looped every 3 s all night. The unit now allows 10 starts in 120 s, enough to wait for
+  `uniwill_wmi` at boot, and then stays failed.
 
 ## [0.3.0] - 2026-10-24
 
