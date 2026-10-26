@@ -45,6 +45,10 @@ may change in any `0.y` release. See "Versioning" in the README.
 - A power loss or failed resume while the profile store was being written could leave
   `profiles.json` empty or truncated, and the next start silently reset to the built-in
   profiles. The store is now written to a synced temp file and renamed into place.
+- Fan-curve interpolation overflowed `i32` on curves with large values (accepted unchecked
+  from `SAVEPROFILE` and TCC imports): a panic in debug builds, and in release a wrapped,
+  possibly negative duty that switched the fan off. The math is now done in `i128` and the
+  duty is clamped to 0..=100.
 
 ## [0.3.0] - 2026-10-24
 

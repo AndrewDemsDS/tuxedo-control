@@ -255,11 +255,12 @@ fn curve_duty(curve: &[(i32, i32)], temp: i32, prev: i32, hyst: i32, on_for: Dur
     if up >= prev {
         return up;
     }
-    let down = interp(curve, temp + hyst).min(prev);
+    let down = interp(curve, temp.saturating_add(hyst)).min(prev);
     if down > 0 || prev == 0 {
         return down;
     }
-    if on_for >= FAN_MIN_ON && interp(curve, temp + hyst + FAN_OFF_EXTRA_C) == 0 {
+    let off_temp = temp.saturating_add(hyst).saturating_add(FAN_OFF_EXTRA_C);
+    if on_for >= FAN_MIN_ON && interp(curve, off_temp) == 0 {
         return 0;
     }
     let floor = curve
@@ -271,7 +272,14 @@ fn curve_duty(curve: &[(i32, i32)], temp: i32, prev: i32, hyst: i32, on_for: Dur
     floor.min(prev)
 }
 
+/// Duty % for `temp`, clamped to 0..=100. Curves arrive unchecked over the socket and from TCC
+/// imports. In i32 a large point overflowed the slope math (a panic in debug builds, a wrapped
+/// and possibly negative duty, i.e. fan off, in release); i128 holds any pair of i32 points.
 fn interp(curve: &[(i32, i32)], temp: i32) -> i32 {
+    interp_raw(curve, temp).clamp(0, 100)
+}
+
+fn interp_raw(curve: &[(i32, i32)], temp: i32) -> i32 {
     if curve.is_empty() {
         return 0;
     }
@@ -287,7 +295,9 @@ fn interp(curve: &[(i32, i32)], temp: i32) -> i32 {
             return if t1 == t0 {
                 d1
             } else {
-                d0 + (d1 - d0) * (temp - t0) / (t1 - t0)
+                let (t0, d0, t1, d1, t) =
+                    (t0 as i128, d0 as i128, t1 as i128, d1 as i128, temp as i128);
+                (d0 + (d1 - d0) * (t - t0) / (t1 - t0)).clamp(0, 100) as i32
             };
         }
     }
@@ -903,6 +913,16 @@ mod tests {
         let curve = [(40, 0), (80, 100)];
         assert_eq!(interp(&curve, 60), 50);
         assert_eq!(interp(&curve, 50), 25);
+    }
+
+    #[test]
+    fn interp_extreme_points_do_not_overflow() {
+        let curve = [(0, 0), (100, i32::MAX)];
+        assert_eq!(interp(&curve, 50), 100);
+        let curve = [(i32::MIN, i32::MIN), (i32::MAX, i32::MAX)];
+        assert!((0..=100).contains(&interp(&curve, 50)));
+        assert_eq!(interp(&[(0, -50), (100, 20)], 0), 0);
+        let _ = curve_duty(&QUIET, i32::MAX, 20, i32::MAX, LONG);
     }
 
     #[test]
