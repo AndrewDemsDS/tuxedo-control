@@ -236,3 +236,30 @@ fn failed_mode_read_is_never_written_back() {
     ec.lock().unwrap().fan1_raw = 0xfe;
     assert!(dev.cpu_fan_pct().is_err());
 }
+
+/// The driver caches model id 0 when its one-time EC probe fails and re-probes on the next
+/// identify. A transient failure must not leave the validated board read-only.
+#[test]
+fn transient_model_probe_failure_is_retried() {
+    use tuxedoio::sim::{mock_with, EcState};
+    let fix = MODELS
+        .iter()
+        .find(|f| f.is_validated())
+        .copied()
+        .expect("need a validated fixture");
+    let st = EcState {
+        model_probe_failures: 1,
+        ..EcState::default()
+    };
+    let (dev, _ec) = mock_with(fix, st);
+    assert!(dev.write_allowed(), "one failed probe must be retried");
+    assert_eq!(dev.model_id().unwrap(), fix.model_id);
+
+    // A probe that keeps failing stays read-only (fail safe).
+    let st = EcState {
+        model_probe_failures: 100,
+        ..EcState::default()
+    };
+    let (dev, _ec) = mock_with(fix, st);
+    assert!(!dev.write_allowed());
+}

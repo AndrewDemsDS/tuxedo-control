@@ -183,6 +183,9 @@ pub struct EcState {
     pub gpu_temp: i32,
     /// Last performance-profile id written (0 = none).
     pub last_perf: i32,
+    /// Model-id reads that return 0 because the driver's feature probe hit an EC error. The
+    /// driver caches 0 and re-probes on the next `R_HWCHECK_UW`, so each identify uses one up.
+    pub model_probe_failures: u32,
 }
 
 impl Default for EcState {
@@ -195,6 +198,7 @@ impl Default for EcState {
             cpu_temp: 45,
             gpu_temp: 0,
             last_perf: 0,
+            model_probe_failures: 0,
         }
     }
 }
@@ -223,9 +227,13 @@ impl MockEc {
 
 impl EcBackend for MockEc {
     fn rd(&self, req: libc::c_ulong) -> io::Result<i32> {
-        let st = self.st.lock().unwrap();
+        let mut st = self.st.lock().unwrap();
         let v = match req {
-            r if r == R_HWCHECK_UW => self.fix.is_uniwill as i32,
+            r if r == R_HWCHECK_UW => {
+                st.model_probe_failures = st.model_probe_failures.saturating_sub(1);
+                self.fix.is_uniwill as i32
+            }
+            r if r == R_UW_MODEL_ID && st.model_probe_failures > 0 => 0,
             r if r == R_UW_MODEL_ID => self.fix.model_id,
             r if r == R_UW_FAN_TEMP => st.cpu_temp,
             r if r == R_UW_FAN_TEMP2 => st.gpu_temp,
@@ -303,6 +311,13 @@ impl EcBackend for MockEc {
 /// [`crate::KNOWN_MODELS`]), returning the device plus a handle to inspect the simulated EC.
 pub fn mock(fix: ModelFixture) -> (TuxedoIo, EcHandle) {
     let (be, h) = MockEc::new(fix);
+    (TuxedoIo::from_backend(Box::new(be)), h)
+}
+
+/// Like [`mock`] but starting from a given EC state (applied before the model gate runs).
+pub fn mock_with(fix: ModelFixture, state: EcState) -> (TuxedoIo, EcHandle) {
+    let (be, h) = MockEc::new(fix);
+    *h.lock().unwrap() = state;
     (TuxedoIo::from_backend(Box::new(be)), h)
 }
 

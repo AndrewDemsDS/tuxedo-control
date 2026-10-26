@@ -238,10 +238,25 @@ impl TuxedoIo {
         };
         // Best-effort: if the model id can't be read, stay locked (fail safe to read-only).
         me.write_allowed = me
-            .model_id()
+            .probe_model_id()
             .map(|id| known_model(id).is_some())
             .unwrap_or(false);
         me
+    }
+
+    /// Model id for the write gate. The driver reads it from the EC once and caches 0 when that
+    /// read fails, re-probing on the next `R_HWCHECK_UW`. Taking a single 0 at face value ran a
+    /// validated board read-only until the next restart, so re-identify a few times first. Only
+    /// re-read after a positive identify: on an unidentified interface the read is a NULL deref.
+    fn probe_model_id(&self) -> io::Result<i32> {
+        let mut id = self.model_id()?;
+        for _ in 0..3 {
+            if id != 0 || self.rd(R_HWCHECK_UW)? != 1 {
+                break;
+            }
+            id = self.model_id()?;
+        }
+        Ok(id)
     }
 
     /// Wrap any backend WITHOUT the model write-gate. `pub(crate)`: keeps the ungated

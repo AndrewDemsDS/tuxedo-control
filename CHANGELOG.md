@@ -30,6 +30,9 @@ may change in any `0.y` release. See "Versioning" in the README.
   values with bits outside the documented set, so `set_fan_pct` errors instead of writing, and
   out-of-range fan duty reads are rejected instead of reported as 127 %. The prober still
   prints the raw register.
+- One failed EC read during the driver's model probe left a validated board read-only until
+  the next restart. The driver caches model id 0 on that error and re-probes on the next
+  identify; the write gate now re-runs `R_HWCHECK_UW` (up to 3 times) before accepting 0.
 
 ## [0.3.0] - 2026-10-24
 
