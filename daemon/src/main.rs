@@ -13,7 +13,7 @@
 //!   FANMANUAL <0-100> -> OK             (hold a fixed duty)
 
 use serde::Deserialize;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -40,6 +40,11 @@ const FAN_DEADBAND_PCT: i32 = 3;
 /// Consecutive implausible CPU temperature reads (error, <= 0 or >= 120 C) before the loop
 /// stops trusting the EC and hands the fan back to its automatic control.
 const MAX_BAD_TEMP_READS: u32 = 3;
+/// Socket clients are served one at a time, so a client that connects and never finishes its
+/// line must not hold the socket thread: give up on it after this long.
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(2);
+/// Longest request line accepted (a SAVEPROFILE JSON is well under 1 KiB).
+const MAX_REQUEST: u64 = 64 * 1024;
 
 /// A CPU temperature the curve may act on. 0 is what a failed or raced EC read returns, and
 /// acting on it would let the curve switch the fan off while the CPU is hot.
@@ -311,10 +316,13 @@ fn handle_client(
     shared: &Arc<Mutex<Shared>>,
     store: &Arc<Mutex<Store>>,
 ) {
+    let _ = stream.set_read_timeout(Some(CLIENT_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(CLIENT_TIMEOUT));
     let mut reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
         Err(_) => return,
-    });
+    })
+    .take(MAX_REQUEST);
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() {
         return;
@@ -1074,6 +1082,24 @@ mod tests {
         let a = suspended_total();
         std::thread::sleep(Duration::from_millis(50));
         assert!(suspended_total().saturating_sub(a) < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn silent_socket_client_does_not_block_the_server() {
+        use tuxedoio::sim::{mock, MODELS};
+        let dir = unique_dir("sock-timeout");
+        let path = dir.join("s.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        // Connect and send nothing, like a hung or hostile local client.
+        let _client = UnixStream::connect(&path).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let dev = Arc::new(Mutex::new(mock(MODELS[0]).0));
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let store = Arc::new(Mutex::new(profiles::default_store()));
+        let t = Instant::now();
+        handle_client(stream, &dev, &shared, &store);
+        assert!(t.elapsed() < CLIENT_TIMEOUT + Duration::from_secs(2));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

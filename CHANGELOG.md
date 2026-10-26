@@ -39,6 +39,9 @@ may change in any `0.y` release. See "Versioning" in the README.
   previously killed instance) and, when it detects a resume itself (CLOCK_BOOTTIME jumping
   ahead of CLOCK_MONOTONIC), re-runs that setup and re-applies the perf profile. This no
   longer depends on `tuxedo-control-sleep.service` being enabled.
+- One socket client that connected and never sent a full line blocked the daemon's control
+  socket for every other client (the GUI froze) because requests are served one at a time with
+  no read timeout. Clients now time out after 2 s and a request line is capped at 64 KiB.
 
 ## [0.3.0] - 2026-10-24
 
