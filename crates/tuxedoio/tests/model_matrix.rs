@@ -209,3 +209,30 @@ fn profile_enforcement() {
         );
     }
 }
+
+/// tuxedo_io never fails a Uniwill read: an EC read error comes back as 0xfe. Clearing 0x40
+/// from that would write 0xbe to 0x0751 (both profile bits plus junk), so the mode read must
+/// reject it and the fan write must not touch the register.
+#[test]
+fn failed_mode_read_is_never_written_back() {
+    let fix = MODELS
+        .iter()
+        .find(|f| f.is_validated())
+        .copied()
+        .expect("need a validated fixture");
+    let (dev, ec) = mock_unchecked(fix);
+    ec.lock().unwrap().reg_0751 = 0xfe;
+    assert!(dev.mode().is_err());
+    assert!(dev.set_fan_pct(60).is_err());
+    let st = *ec.lock().unwrap();
+    assert_eq!(st.reg_0751, 0xfe, "garbage mode must not be written back");
+    assert_eq!(st.fan1_raw, 0);
+
+    // Real values still pass, and an out-of-range fan read is rejected, not scaled to 127%.
+    ec.lock().unwrap().reg_0751 = 0xa0 | FAN_OWNERSHIP_BIT;
+    assert_eq!(dev.mode().unwrap(), 0xe0);
+    dev.set_fan_pct(60).unwrap();
+    assert_eq!(ec.lock().unwrap().reg_0751, 0xa0);
+    ec.lock().unwrap().fan1_raw = 0xfe;
+    assert!(dev.cpu_fan_pct().is_err());
+}

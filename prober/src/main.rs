@@ -4,7 +4,7 @@
 use tuxedoio::*;
 
 fn cmd_info(d: &TuxedoIo) -> std::io::Result<()> {
-    let mode = d.mode()?;
+    let mode = d.rd(R_UW_MODE)?; // raw: the prober must show unexpected bits too
     println!("module version      : {}", d.version().unwrap_or_default());
     println!("uniwill hardware    : {}", d.rd(R_HWCHECK_UW)?);
     println!("model id            : {:#x}", d.rd(R_UW_MODEL_ID)?);
@@ -30,7 +30,7 @@ fn cmd_info(d: &TuxedoIo) -> std::io::Result<()> {
 fn cmd_watch(d: &TuxedoIo) -> std::io::Result<()> {
     println!("ctrl-c to stop");
     loop {
-        let mode = d.mode()?;
+        let mode = d.rd(R_UW_MODE)?; // raw: the prober must show unexpected bits too
         println!(
             "cpu {}C fan {}%  | gpu {}C fan {}%  | 0x0751={:#04x}{}",
             d.cpu_temp()?,
@@ -91,7 +91,7 @@ fn main() {
                 std::process::exit(2);
             }
         },
-        Some("mode-get") => d.mode().map(|m| println!("0x0751 = {:#04x}", m)),
+        Some("mode-get") => d.rd(R_UW_MODE).map(|m| println!("0x0751 = {:#04x}", m)),
         Some("mode-set") => match args
             .get(2)
             .and_then(|s| i32::from_str_radix(s.trim_start_matches("0x"), 16).ok())

@@ -56,6 +56,18 @@ pub const W_UW_PERF_PROF: libc::c_ulong = iow(WR_UW, 0x18);
 pub const FAN_MAX: i32 = 0xc8;
 /// Bit in EC RAM 0x0751: when SET, `uw_set_fan` is a no-op and the EC owns the fan.
 pub const FAN_OWNERSHIP_BIT: i32 = 0x40;
+/// Every bit of EC RAM 0x0751 the driver documents: perf profile (`0xa0` power save, `0x10`
+/// overboost) plus fan ownership. tuxedo_io never fails a Uniwill read: an EC read error comes
+/// back as `0xfe` (or stale stack bytes), so a value with any other bit set is not a real
+/// register value and must never be written back.
+pub const MODE_KNOWN_BITS: i32 = 0xa0 | 0x10 | FAN_OWNERSHIP_BIT;
+
+fn bad_read(what: &str, v: i32) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("implausible {what} read {v:#x} (EC read error?)"),
+    )
+}
 
 /// A board validated on real hardware: its model id and fan-duty raw max. Only boards that
 /// have been exercised with the prober belong here; the daemon refuses fan/EC writes on any
@@ -278,13 +290,26 @@ impl TuxedoIo {
         self.rd(R_UW_FAN_TEMP2)
     }
     pub fn cpu_fan_pct(&self) -> io::Result<i32> {
-        Ok(raw_to_pct(self.rd(R_UW_FANSPEED)?))
+        self.fan_pct(R_UW_FANSPEED)
     }
     pub fn gpu_fan_pct(&self) -> io::Result<i32> {
-        Ok(raw_to_pct(self.rd(R_UW_FANSPEED2)?))
+        self.fan_pct(R_UW_FANSPEED2)
     }
+    fn fan_pct(&self, req: libc::c_ulong) -> io::Result<i32> {
+        let raw = self.rd(req)?;
+        if !(0..=FAN_MAX).contains(&raw) {
+            return Err(bad_read("fan duty", raw));
+        }
+        Ok(raw_to_pct(raw))
+    }
+    /// EC RAM 0x0751. Errors on a value with bits outside [`MODE_KNOWN_BITS`] (a failed EC
+    /// read), so callers never act on, or write back, a garbage mode.
     pub fn mode(&self) -> io::Result<i32> {
-        self.rd(R_UW_MODE)
+        let m = self.rd(R_UW_MODE)?;
+        if m & !MODE_KNOWN_BITS != 0 {
+            return Err(bad_read("mode 0x0751", m));
+        }
+        Ok(m)
     }
 
     /// Board model id (EC RAM 0x0740 via R_UW_MODEL_ID). Used to gate behaviour to
@@ -316,7 +341,8 @@ impl TuxedoIo {
     }
 
     /// Clear bit 0x40 of 0x0751 so manual fan writes are honoured. Returns true if it
-    /// had to fix it (i.e. the EC had grabbed fan ownership).
+    /// had to fix it (i.e. the EC had grabbed fan ownership). A failed mode read is an error,
+    /// never written back: `0xfe` would otherwise come back as `0xbe` and set both profile bits.
     pub fn ensure_manual(&self) -> io::Result<bool> {
         let m = self.mode()?;
         if m & FAN_OWNERSHIP_BIT != 0 {

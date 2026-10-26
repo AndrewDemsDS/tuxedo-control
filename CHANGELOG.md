@@ -24,6 +24,12 @@ may change in any `0.y` release. See "Versioning" in the README.
   fan write after start (EC fan-table init, ~13 s) outlasted `TimeoutStopSec=10`. The loop now
   wakes on SIGTERM, skips the fan write once asked to stop, and the unit allows 30 s (the
   NixOS unit had no limit and used systemd's 90 s). `poll_seconds = 0` no longer busy-loops.
+- A failed EC read of the mode register (0x0751) could be written back as garbage. tuxedo_io
+  never fails a Uniwill read: an EC error comes back as `0xfe`, and clearing the fan-ownership
+  bit from that wrote `0xbe` (both performance bits plus undefined bits). `mode()` now rejects
+  values with bits outside the documented set, so `set_fan_pct` errors instead of writing, and
+  out-of-range fan duty reads are rejected instead of reported as 127 %. The prober still
+  prints the raw register.
 
 ## [0.3.0] - 2026-10-24
 
