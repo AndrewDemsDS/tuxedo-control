@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
         QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
 
-    KAboutData about(QStringLiteral("tuxedo-control-kde"), i18n("TUXEDO Control"), QStringLiteral("0.3.0"),
+    KAboutData about(QStringLiteral("tuxedo-control-kde"), i18n("TUXEDO Control"), QStringLiteral("0.3.1"),
                      i18n("Fan, EC profile, keyboard and charging control for TUXEDO Uniwill laptops"),
                      KAboutLicense::MIT);
     about.setDesktopFileName(QStringLiteral("org.andreasincode.tuxedocontrol"));

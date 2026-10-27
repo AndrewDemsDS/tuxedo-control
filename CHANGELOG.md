@@ -9,6 +9,8 @@ may change in any `0.y` release. See "Versioning" in the README.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-27
+
 ### Fixed
 - Fan speed swinging up and down under bursty load. The safety floor read the raw CPU
   temperature, which on Ryzen jumps to 80-86 C for a few seconds on every burst, so the fan
@@ -147,7 +149,8 @@ may change in any `0.y` release. See "Versioning" in the README.
   `tuxedo_io` v0.3.9). Other boards are unverified. See "Supported hardware".
 - The driver enforces a ~25% on-speed floor; a requested duty below ~12% becomes 0 (off).
 
-[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AndrewDemsDS/tuxedo-control/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AndrewDemsDS/tuxedo-control/releases/tag/v0.1.0

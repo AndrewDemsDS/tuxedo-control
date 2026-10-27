@@ -1,6 +1,6 @@
 [package]
 name = "tuxedo-prober"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Probe /dev/tuxedo_io: read temps/fan, set fan duty, toggle the 0x40 fan-ownership bit"
 license = "MIT"
