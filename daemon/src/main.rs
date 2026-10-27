@@ -34,6 +34,17 @@ const TEMP_SMOOTH_N: f64 = 10.0;
 const FAN_OFF_EXTRA_C: i32 = 3;
 /// Once the fan starts, it keeps its lowest curve duty for at least this long before stopping.
 const FAN_MIN_ON: Duration = Duration::from_secs(60);
+/// The safety floor reads a short EMA of the raw temperature: a Ryzen package sensor jumps
+/// to 80-86 C for a few seconds on every load burst, and a floor on the raw value kicked the
+/// fan to 45-60% and back on each one. 3 samples is ~6 s at the default poll.
+const FLOOR_SMOOTH_N: f64 = 3.0;
+/// At or above this raw temperature the floor skips the EMA and applies at once.
+const FLOOR_RAW_C: i32 = 90;
+/// Once the safety floor raises the fan, it holds for this long before it may drop.
+const FLOOR_HOLD: Duration = Duration::from_secs(30);
+/// Curve-driven decreases fall at most this many percent per tick, so the fan winds down
+/// instead of stepping. Increases are not limited.
+const FAN_DOWN_STEP_PCT: i32 = 2;
 /// Deadband: don't rewrite fan duty for curve-driven changes smaller than this many percent.
 /// Stops the fan oscillating on small temperature wobble; the safety floor still overrides it.
 const FAN_DEADBAND_PCT: i32 = 3;
@@ -270,6 +281,49 @@ fn curve_duty(curve: &[(i32, i32)], temp: i32, prev: i32, hyst: i32, on_for: Dur
         .min()
         .unwrap_or(0);
     floor.min(prev)
+}
+
+/// The duty to command this tick, from the curve's duty, the previous command, the curve's
+/// lowest nonzero duty and an optional manual override. A manual duty applies exactly.
+/// Otherwise changes under `FAN_DEADBAND_PCT` are ignored and decreases fall by at most
+/// `FAN_DOWN_STEP_PCT` per tick, until the next step would drop below `curve_min`: then a
+/// curve duty of 0 (the fan stopping, which `curve_duty` already gated) applies directly.
+fn next_duty(curve_target: i32, prev: i32, curve_min: i32, manual: Option<i32>) -> i32 {
+    if let Some(m) = manual {
+        return m;
+    }
+    let prev = prev.max(0);
+    if (curve_target - prev).abs() < FAN_DEADBAND_PCT {
+        return prev;
+    }
+    if curve_target >= prev {
+        return curve_target;
+    }
+    let stepped = prev - FAN_DOWN_STEP_PCT;
+    if curve_target == 0 && stepped < curve_min {
+        return 0;
+    }
+    curve_target.max(stepped)
+}
+
+/// Safety-floor state: the floor rises at once and holds for `FLOOR_HOLD` before it may fall.
+#[derive(Default)]
+struct FloorHold {
+    duty: i32,
+    since: Option<Instant>,
+}
+
+impl FloorHold {
+    fn update(&mut self, floor: i32, now: Instant) -> i32 {
+        let expired = self
+            .since
+            .is_none_or(|t| now.duration_since(t) >= FLOOR_HOLD);
+        if floor >= self.duty || expired {
+            self.duty = floor;
+            self.since = (floor > 0).then_some(now);
+        }
+        self.duty
+    }
 }
 
 /// Duty % for `temp`, clamped to 0..=100. Curves arrive unchecked over the socket and from TCC
@@ -653,6 +707,8 @@ fn main() {
 
     let mut commanded: i32 = -1;
     let mut smoothed_temp: f64 = -1.0; // EMA state; <0 = unseeded (first tick)
+    let mut floor_temp: f64 = -1.0; // fast EMA for the safety floor, same convention
+    let mut floor_hold = FloorHold::default();
     let mut fan_on_since: Option<Instant> = None; // when the fan last started from 0
     let mut bad_temp_reads: u32 = 0;
     let mut ec_fallback = false; // true while the fan is handed back to the EC
@@ -669,6 +725,8 @@ fn main() {
             reinit_ec(&dev.lock().unwrap(), perf);
             commanded = -1;
             smoothed_temp = -1.0;
+            floor_temp = -1.0;
+            floor_hold = FloorHold::default();
             fan_on_since = None;
         }
         last_suspended = suspended;
@@ -717,6 +775,8 @@ fn main() {
             ec_fallback = false;
             commanded = -1;
             smoothed_temp = -1.0;
+            floor_temp = -1.0;
+            floor_hold = FloorHold::default();
             fan_on_since = None;
         }
         bad_temp_reads = 0;
@@ -737,22 +797,31 @@ fn main() {
                 (smoothed_temp * (TEMP_SMOOTH_N - 1.0) + f64::from(temp_raw)) / TEMP_SMOOTH_N
             };
             let temp = smoothed_temp.round() as i32;
+            floor_temp = if floor_temp < 0.0 {
+                f64::from(temp_raw)
+            } else {
+                (floor_temp * (FLOOR_SMOOTH_N - 1.0) + f64::from(temp_raw)) / FLOOR_SMOOTH_N
+            };
             let on_for = fan_on_since.map_or(Duration::ZERO, |t| t.elapsed());
             curve_target = curve_duty(&curve, temp, commanded, cfg.hysteresis_c, on_for);
 
             let manual = shared.lock().unwrap().manual;
-            let desired = manual.unwrap_or(curve_target);
-            // Deadband: hold the current duty for small curve-driven changes so the fan stops
-            // oscillating on minor temperature wobble. A manual override applies exactly.
-            let prev = commanded.max(0);
-            let held = if manual.is_some() || (desired - prev).abs() >= FAN_DEADBAND_PCT {
-                desired
+            let curve_min = curve
+                .iter()
+                .map(|&(_, d)| d)
+                .filter(|&d| d > 0)
+                .min()
+                .unwrap_or(0);
+            let held = next_duty(curve_target, commanded, curve_min, manual);
+            // Safety net on a fast EMA of the temperature (on the raw value from FLOOR_RAW_C):
+            // never sit below the safety floor, whatever the curve, deadband or slew say.
+            let floor_c = if temp_raw >= FLOOR_RAW_C {
+                temp_raw
             } else {
-                prev
+                floor_temp.round() as i32
             };
-            // Safety net on the RAW temperature (immediate response to real heat, regardless of
-            // smoothing/deadband): never sit below the safety floor for the current temp.
-            let target = held.max(profiles::safety_floor(temp_raw));
+            let floor = floor_hold.update(profiles::safety_floor(floor_c), Instant::now());
+            let target = held.max(floor);
             // Read-only on unsupported boards: report the curve target but never drive the EC.
             if !read_only && d.set_fan_pct(target).is_ok() && target != commanded {
                 eprintln!(
@@ -880,6 +949,74 @@ mod tests {
             curve_duty(&QUIET, 60, -1, 3, Duration::ZERO),
             interp(&QUIET, 60)
         );
+    }
+
+    // ---- next_duty (deadband and down slew) ----
+
+    #[test]
+    fn next_duty_rises_at_once_and_ignores_small_changes() {
+        assert_eq!(next_duty(60, 21, 20, None), 60);
+        assert_eq!(next_duty(23, 21, 20, None), 21);
+        assert_eq!(next_duty(19, 21, 20, None), 21);
+    }
+
+    #[test]
+    fn next_duty_winds_down_in_steps() {
+        assert_eq!(next_duty(30, 60, 20, None), 58);
+        assert_eq!(next_duty(30, 33, 20, None), 31);
+        // The fan stops only once the slew reaches the curve's lowest duty.
+        assert_eq!(next_duty(0, 33, 20, None), 31);
+        assert_eq!(next_duty(0, 21, 20, None), 0);
+    }
+
+    #[test]
+    fn next_duty_applies_manual_exactly() {
+        assert_eq!(next_duty(60, 21, 20, Some(22)), 22);
+        assert_eq!(next_duty(60, 80, 20, Some(0)), 0);
+    }
+
+    #[test]
+    fn next_duty_unseeded_prev_starts_on_the_curve() {
+        assert_eq!(next_duty(26, -1, 20, None), 26);
+        assert_eq!(next_duty(0, -1, 20, None), 0);
+    }
+
+    // ---- FloorHold (safety floor rises at once, falls after FLOOR_HOLD) ----
+
+    #[test]
+    fn floor_hold_rises_and_holds() {
+        let t0 = Instant::now();
+        let mut h = FloorHold::default();
+        assert_eq!(h.update(0, t0), 0);
+        assert_eq!(h.update(45, t0), 45);
+        assert_eq!(h.update(60, t0 + Duration::from_secs(2)), 60);
+        // A cooler reading inside the hold keeps the higher floor.
+        assert_eq!(h.update(30, t0 + Duration::from_secs(20)), 60);
+        assert_eq!(h.update(0, t0 + Duration::from_secs(31)), 60);
+        // FLOOR_HOLD after the last rise, it follows the temperature again.
+        assert_eq!(h.update(0, t0 + Duration::from_secs(32)), 0);
+        assert_eq!(h.update(0, t0 + Duration::from_secs(40)), 0);
+    }
+
+    #[test]
+    fn floor_hold_restarts_the_hold_on_a_repeat_spike() {
+        let t0 = Instant::now();
+        let mut h = FloorHold::default();
+        h.update(45, t0);
+        assert_eq!(h.update(45, t0 + Duration::from_secs(25)), 45);
+        // The repeat at 25 s restarted the hold, so 40 s still holds.
+        assert_eq!(h.update(0, t0 + Duration::from_secs(40)), 45);
+        assert_eq!(h.update(0, t0 + Duration::from_secs(56)), 0);
+    }
+
+    #[test]
+    fn floor_hold_drops_to_a_lower_floor_after_the_hold() {
+        let t0 = Instant::now();
+        let mut h = FloorHold::default();
+        h.update(60, t0);
+        assert_eq!(h.update(30, t0 + Duration::from_secs(31)), 30);
+        assert_eq!(h.update(0, t0 + Duration::from_secs(50)), 30);
+        assert_eq!(h.update(0, t0 + Duration::from_secs(61)), 0);
     }
 
     // ---- interp (fan-curve interpolation) ----

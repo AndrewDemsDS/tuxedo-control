@@ -10,6 +10,10 @@ may change in any `0.y` release. See "Versioning" in the README.
 ## [Unreleased]
 
 ### Fixed
+- Fan speed swinging up and down under bursty load. The safety floor read the raw CPU
+  temperature, which on Ryzen jumps to 80-86 C for a few seconds on every burst, so the fan
+  went to 45-60% and back each time. The floor now reads a 3-sample EMA (raw from 90 C), holds
+  for 30 s once it rises, and curve-driven decreases fall 2% per tick instead of stepping.
 - Kernel NULL dereference in tuxedo_io on every daemon start when `tuxedo_io` loaded before
   `uniwill_wmi` (the `modules-load.d` entry makes that the normal case). The library read
   `R_UW_MODEL_ID` before `R_HWCHECK_UW`, so tuxedo_io's feature table was still NULL. Every
